@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+.prose h2 { @apply text-lg font-semibold text-gray-900 mt-4 mb-2; }
+.prose ul { @apply list-disc list-inside space-y-1 my-2; }
+.prose strong { @apply font-semibold text-gray-900; }
