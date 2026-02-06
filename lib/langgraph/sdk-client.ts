@@ -82,7 +82,7 @@ export async function* streamGraph(
   assistantId = config.assistantId
 ): AsyncGenerator<StreamEvent> {
   const stream = getClient().runs.stream(threadId, assistantId, {
-    input,
+    input: input as unknown as Record<string, unknown>,
     streamMode: 'events',
   });
 
@@ -99,7 +99,7 @@ export async function invokeGraph(
   input: GraphInput,
   assistantId = config.assistantId
 ): Promise<GraphResult> {
-  const result = await getClient().runs.wait(threadId, assistantId, { input });
+  const result = await getClient().runs.wait(threadId, assistantId, { input: input as unknown as Record<string, unknown> });
   return result as unknown as GraphResult;
 }
 
