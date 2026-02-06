@@ -531,7 +531,10 @@ async function handleFastAPIMode(
             // Heartbeat / unknown
             // ---------------------------------------------------------------
             case 'heartbeat':
-              // Silently consumed — keep-alive only
+              // Forward heartbeat to client to keep connection alive and reset heartbeat timeout
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ type: 'step_progress', step: 'Assess Eligibility', detail: 'Processing...' })}\n\n`
+              ));
               break;
 
             default:
