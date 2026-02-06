@@ -81,8 +81,8 @@ export default function ChatPage() {
                   ) : (
                     <>
                       {/* Chat Messages */}
-                      {messages.map((message) => (
-                        <ChatMessage key={message.id} message={message} />
+                      {messages.map((message, idx) => (
+                        <ChatMessage key={message.id} message={message} isLatest={idx === messages.length - 1} />
                       ))}
 
                       {/* Pipeline Visualization (inline when running) */}

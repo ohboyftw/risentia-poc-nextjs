@@ -331,9 +331,9 @@ async function handleFastAPIMode(
   // Convert patient profile to API format
   const patientInput = patientProfileToInput(session.patientProfile, sessionId);
 
-  // 5-minute timeout
+  // 4-minute timeout (must be under Vercel's 300s function limit)
   const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), 5 * 60 * 1000);
+  const timeout = setTimeout(() => abortController.abort(), 4 * 60 * 1000);
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -545,7 +545,7 @@ async function handleFastAPIMode(
       } catch (error) {
         console.error('FastAPI stream error:', error);
         const msg = error instanceof Error
-          ? (error.name === 'AbortError' ? 'Request timed out after 5 minutes' : error.message)
+          ? (error.name === 'AbortError' ? 'Request timed out — the matching is still processing on the backend. Please retry in a moment.' : error.message)
           : 'FastAPI connection error';
         controller.enqueue(encoder.encode(
           `data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`

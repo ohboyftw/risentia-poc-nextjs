@@ -1,18 +1,24 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { User, Bot, Sparkles } from 'lucide-react';
+import { User, Bot, Sparkles, RotateCcw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { useChatStore } from '@/hooks/use-chat-store';
 import type { ChatMessage as ChatMessageType } from '@/types';
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  isLatest?: boolean;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, isLatest = false }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const isError = !isUser && message.content.startsWith('Error:');
+  const { retryLastMessage, lastUserMessage, isLoading } = useChatStore();
+  const canRetry = isError && isLatest && lastUserMessage && !isLoading;
 
   return (
     <motion.div
@@ -23,20 +29,26 @@ export function ChatMessage({ message }: ChatMessageProps) {
         'flex gap-3 p-4 rounded-xl transition-colors',
         isUser
           ? 'bg-accent/5 border border-accent/10'
-          : 'bg-muted/50'
+          : isError
+            ? 'bg-destructive/5 border border-destructive/20'
+            : 'bg-muted/50'
       )}
     >
       <Avatar className={cn(
         'h-9 w-9 shrink-0 ring-2 ring-offset-2',
         isUser
           ? 'bg-accent ring-accent/20'
-          : 'bg-primary ring-primary/20'
+          : isError
+            ? 'bg-destructive ring-destructive/20'
+            : 'bg-primary ring-primary/20'
       )}>
         <AvatarFallback className={cn(
           'text-sm font-medium',
           isUser
             ? 'bg-accent text-accent-foreground'
-            : 'bg-primary text-primary-foreground'
+            : isError
+              ? 'bg-destructive text-destructive-foreground'
+              : 'bg-primary text-primary-foreground'
         )}>
           {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
         </AvatarFallback>
@@ -47,7 +59,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <span className="text-sm font-medium">
             {isUser ? 'You' : 'Risentia AI'}
           </span>
-          {!isUser && (
+          {!isUser && !isError && (
             <Sparkles className="h-3 w-3 text-accent" />
           )}
           <span className="text-xs text-muted-foreground">
@@ -74,6 +86,18 @@ export function ChatMessage({ message }: ChatMessageProps) {
             {message.content}
           </ReactMarkdown>
         </div>
+
+        {canRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => retryLastMessage()}
+            className="mt-2 gap-2 text-xs"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Retry matching
+          </Button>
+        )}
       </div>
     </motion.div>
   );

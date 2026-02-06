@@ -4,6 +4,9 @@ import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, PatientProfile, PipelineStep, TrialMatch, TrialProgressEvent, PIPELINE_STEPS, createEmptyPatientProfile, AppMode } from '@/types';
 
+// Heartbeat timeout: if no SSE event for this long, assume connection is dead
+const HEARTBEAT_TIMEOUT_MS = 45_000; // 45 seconds
+
 interface ChatState {
   sessionId: string;
   messages: ChatMessage[];
@@ -16,8 +19,10 @@ interface ChatState {
   mode: AppMode;
   trialProgress: TrialProgressEvent[];
   matchingDetail: string | null;
+  lastUserMessage: string | null; // Track last message for retry
 
   sendMessage: (content: string) => Promise<void>;
+  retryLastMessage: () => Promise<void>;
   reset: () => void;
   setMode: (mode: AppMode) => void;
 }
@@ -34,6 +39,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mode: 'fastapi',
   trialProgress: [],
   matchingDetail: null,
+  lastUserMessage: null,
 
   sendMessage: async (content: string) => {
     const { sessionId, messages, mode } = get();
@@ -52,6 +58,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isPipelineRunning: false,
       trialProgress: [],
       matchingDetail: null,
+      lastUserMessage: content,
     });
 
     try {
@@ -69,125 +76,176 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Heartbeat timeout: detect dead connections
+      let lastEventTime = Date.now();
+      let heartbeatDead = false;
+      const heartbeatChecker = setInterval(() => {
+        if (Date.now() - lastEventTime > HEARTBEAT_TIMEOUT_MS) {
+          heartbeatDead = true;
+          reader.cancel();
+          clearInterval(heartbeatChecker);
+        }
+      }, 5000);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
+          lastEventTime = Date.now(); // Reset heartbeat on any data
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
 
-              switch (data.type) {
-                case 'step_start':
-                  set({ isPipelineRunning: true });
-                  set(state => ({
-                    pipelineSteps: state.pipelineSteps.map(step =>
-                      step.name === data.step ? { ...step, status: 'running' as const, detail: data.message || undefined } : step
-                    ),
-                  }));
-                  break;
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
 
-                case 'step_complete':
-                  set(state => ({
-                    pipelineSteps: state.pipelineSteps.map(step =>
-                      step.name === data.step ? { ...step, status: 'complete' as const, cost: data.cost, detail: undefined } : step
-                    ),
-                  }));
-                  break;
+                switch (data.type) {
+                  case 'step_start':
+                    set({ isPipelineRunning: true });
+                    set(state => ({
+                      pipelineSteps: state.pipelineSteps.map(step =>
+                        step.name === data.step ? { ...step, status: 'running' as const, detail: data.message || undefined } : step
+                      ),
+                    }));
+                    break;
 
-                case 'step_progress':
-                  set(state => ({
-                    pipelineSteps: state.pipelineSteps.map(step =>
-                      step.name === data.step ? { ...step, detail: data.detail || data.message || step.detail } : step
-                    ),
-                    matchingDetail: data.detail || data.message || state.matchingDetail,
-                  }));
-                  break;
+                  case 'step_complete':
+                    set(state => ({
+                      pipelineSteps: state.pipelineSteps.map(step =>
+                        step.name === data.step ? { ...step, status: 'complete' as const, cost: data.cost, detail: undefined } : step
+                      ),
+                    }));
+                    break;
 
-                case 'trial_progress':
-                  set(state => ({
-                    trialProgress: [...state.trialProgress, {
-                      nctId: data.nctId,
-                      title: data.title,
-                      index: data.index,
-                      total: data.total,
-                      status: data.status,
-                      confidence: data.confidence,
-                    }],
-                  }));
-                  break;
+                  case 'step_progress':
+                    set(state => ({
+                      pipelineSteps: state.pipelineSteps.map(step =>
+                        step.name === data.step ? { ...step, detail: data.detail || data.message || step.detail } : step
+                      ),
+                      matchingDetail: data.detail || data.message || state.matchingDetail,
+                    }));
+                    break;
 
-                case 'response': {
-                  const assistantMessage: ChatMessage = {
-                    id: uuidv4(),
-                    role: 'assistant',
-                    content: data.content,
-                    timestamp: new Date(),
-                    metadata: { patientData: data.patientData, trials: data.trials },
-                  };
+                  case 'trial_progress':
+                    set(state => ({
+                      trialProgress: [...state.trialProgress, {
+                        nctId: data.nctId,
+                        title: data.title,
+                        index: data.index,
+                        total: data.total,
+                        status: data.status,
+                        confidence: data.confidence,
+                      }],
+                    }));
+                    break;
 
-                  // Mark all steps as complete (defensive)
-                  set(state => ({
-                    messages: [...state.messages, assistantMessage],
-                    patientProfile: data.patientData || state.patientProfile,
-                    trials: data.trials || [],
-                    totalCost: data.totalCost || 0,
-                    isPipelineRunning: false,
-                    pipelineSteps: state.pipelineSteps.map(step =>
-                      step.status === 'pending' || step.status === 'running'
-                        ? { ...step, status: 'complete' as const, detail: undefined }
-                        : step
-                    ),
-                  }));
-                  break;
+                  case 'response': {
+                    const assistantMessage: ChatMessage = {
+                      id: uuidv4(),
+                      role: 'assistant',
+                      content: data.content,
+                      timestamp: new Date(),
+                      metadata: { patientData: data.patientData, trials: data.trials },
+                    };
+
+                    // Mark all steps as complete (defensive)
+                    set(state => ({
+                      messages: [...state.messages, assistantMessage],
+                      patientProfile: data.patientData || state.patientProfile,
+                      trials: data.trials || [],
+                      totalCost: data.totalCost || 0,
+                      isPipelineRunning: false,
+                      lastUserMessage: null, // Clear retry state on success
+                      pipelineSteps: state.pipelineSteps.map(step =>
+                        step.status === 'pending' || step.status === 'running'
+                          ? { ...step, status: 'complete' as const, detail: undefined }
+                          : step
+                      ),
+                    }));
+                    break;
+                  }
+
+                  case 'error': {
+                    const errorMessage: ChatMessage = {
+                      id: uuidv4(),
+                      role: 'assistant',
+                      content: `Error: ${data.message}\n\nYou can retry by clicking the retry button or sending your message again.`,
+                      timestamp: new Date(),
+                    };
+                    // Mark running steps as error
+                    set(state => ({
+                      messages: [...state.messages, errorMessage],
+                      isPipelineRunning: false,
+                      pipelineSteps: state.pipelineSteps.map(step =>
+                        step.status === 'running'
+                          ? { ...step, status: 'error' as const }
+                          : step
+                      ),
+                    }));
+                    break;
+                  }
+
+                  case 'done':
+                    // Stream end marker — no-op
+                    break;
                 }
-
-                case 'error': {
-                  const errorMessage: ChatMessage = {
-                    id: uuidv4(),
-                    role: 'assistant',
-                    content: `⚠️ ${data.message}`,
-                    timestamp: new Date(),
-                  };
-                  // Mark running steps as error
-                  set(state => ({
-                    messages: [...state.messages, errorMessage],
-                    isPipelineRunning: false,
-                    pipelineSteps: state.pipelineSteps.map(step =>
-                      step.status === 'running'
-                        ? { ...step, status: 'error' as const }
-                        : step
-                    ),
-                  }));
-                  break;
-                }
-
-                case 'done':
-                  // Stream end marker — no-op
-                  break;
+              } catch (e) {
+                console.error('Parse error:', e);
               }
-            } catch (e) {
-              console.error('Parse error:', e);
             }
           }
         }
+      } finally {
+        clearInterval(heartbeatChecker);
+      }
+
+      // If stream ended due to heartbeat timeout, surface a specific error
+      if (heartbeatDead) {
+        throw new Error('Connection lost — no response from server for 45 seconds. The matching may still be running on the backend.');
       }
     } catch (error) {
       console.error('Chat error:', error);
+      const msg = error instanceof Error ? error.message : 'Connection error';
       const errorMessage: ChatMessage = {
         id: uuidv4(),
         role: 'assistant',
-        content: '⚠️ Error occurred. Please try again.',
+        content: `Error: ${msg}\n\nYou can retry by clicking the retry button or sending your message again.`,
         timestamp: new Date(),
       };
-      set(state => ({ messages: [...state.messages, errorMessage] }));
+      set(state => ({
+        messages: [...state.messages, errorMessage],
+        isPipelineRunning: false,
+        pipelineSteps: state.pipelineSteps.map(step =>
+          step.status === 'running'
+            ? { ...step, status: 'error' as const }
+            : step
+        ),
+      }));
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  retryLastMessage: async () => {
+    const { lastUserMessage, sendMessage } = get();
+    if (lastUserMessage) {
+      // Remove the last error message before retrying
+      set(state => {
+        const messages = [...state.messages];
+        // Remove trailing error messages
+        while (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content.startsWith('Error:')) {
+          messages.pop();
+        }
+        // Remove the user message that triggered the error (sendMessage will re-add it)
+        if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+          messages.pop();
+        }
+        return { messages };
+      });
+      await sendMessage(lastUserMessage);
     }
   },
 
@@ -202,6 +260,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       totalCost: 0,
       trialProgress: [],
       matchingDetail: null,
+      lastUserMessage: null,
     });
   },
 
