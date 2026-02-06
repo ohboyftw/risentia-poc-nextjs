@@ -238,7 +238,7 @@ export async function* parseSSEStream(
  */
 export async function* streamMatching(
   patient: PatientInput,
-  maxResults: number = 20,
+  maxResults: number = 10,
   signal?: AbortSignal
 ): AsyncGenerator<FastAPIEvent> {
   const url = `${config.apiUrl}/match/stream?max_results=${maxResults}`;

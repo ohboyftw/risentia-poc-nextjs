@@ -16,10 +16,16 @@ import {
   checkHealth as checkFastAPIHealth,
   FastAPIEvent,
 } from '@/lib/fastapi-client';
+import { chatWithQwen } from '@/lib/qwen-client';
 import { PatientProfile, createEmptyPatientProfile, TrialResult } from '@/types';
 
 // In-memory session store (use Redis in production)
-const sessions = new Map<string, { patientProfile: PatientProfile; threadId?: string }>();
+interface Session {
+  patientProfile: PatientProfile;
+  threadId?: string;
+  chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+const sessions = new Map<string, Session>();
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,7 +38,7 @@ export async function POST(request: NextRequest) {
     // Get or create session
     let session = sessions.get(sessionId);
     if (!session) {
-      session = { patientProfile: createEmptyPatientProfile() };
+      session = { patientProfile: createEmptyPatientProfile(), chatHistory: [] };
       sessions.set(sessionId, session);
     }
 
@@ -59,7 +65,7 @@ export async function POST(request: NextRequest) {
 
 async function handleLocalMode(
   encoder: TextEncoder,
-  session: { patientProfile: PatientProfile },
+  session: Session,
   sessionId: string,
   message: string,
   triggerMatching: boolean
@@ -152,7 +158,7 @@ async function handleLocalMode(
 
 async function handleRemoteMode(
   encoder: TextEncoder,
-  session: { patientProfile: PatientProfile; threadId?: string },
+  session: Session,
   sessionId: string,
   message: string,
   triggerMatching: boolean
@@ -243,30 +249,57 @@ async function handleRemoteMode(
 
 async function handleFastAPIMode(
   encoder: TextEncoder,
-  session: { patientProfile: PatientProfile },
+  session: Session,
   sessionId: string,
   message: string,
   triggerMatching: boolean
 ) {
-  // First, parse patient info from message if needed
-  if (!session.patientProfile.cancerType || !triggerMatching) {
-    const parsedProfile = parsePatientFromMessage(message);
+  // Always parse patient info from the message
+  const parsedProfile = parsePatientFromMessage(message);
+  const hasPatientData = Object.keys(parsedProfile).some(
+    k => k !== 'biomarkers' && k !== 'priorTreatments' && parsedProfile[k as keyof typeof parsedProfile] !== undefined
+  ) || Object.keys(parsedProfile.biomarkers || {}).length > 0 || (parsedProfile.priorTreatments || []).length > 0;
+
+  if (hasPatientData) {
     session.patientProfile = {
       ...session.patientProfile,
       ...parsedProfile,
+      biomarkers: { ...session.patientProfile.biomarkers, ...parsedProfile.biomarkers },
+      priorTreatments: [
+        ...new Set([...session.patientProfile.priorTreatments, ...(parsedProfile.priorTreatments || [])]),
+      ],
       rawText: message,
     };
-    sessions.set(sessionId, session);
   }
 
-  // If not triggering matching, just return the parsed profile
+  // If not triggering matching, chat with Qwen LLM
   if (!triggerMatching) {
+    let content: string;
+    try {
+      content = await chatWithQwen(message, session.chatHistory);
+    } catch (err) {
+      console.error('Qwen chat error:', err);
+      // Graceful fallback if DashScope is unavailable
+      content = hasPatientData
+        ? `Got it — I've updated your patient profile. Say **"find trials"** when you're ready to search.`
+        : `I'm your clinical trial matching assistant. Describe a patient profile (age, cancer type, stage, biomarkers) and I'll help find matching trials.`;
+    }
+
+    // Update chat history
+    session.chatHistory.push({ role: 'user', content: message });
+    session.chatHistory.push({ role: 'assistant', content });
+    // Keep history bounded (last 20 messages)
+    if (session.chatHistory.length > 20) {
+      session.chatHistory = session.chatHistory.slice(-20);
+    }
+    sessions.set(sessionId, session);
+
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(
           `data: ${JSON.stringify({
             type: 'response',
-            content: `I've captured your patient profile. Say "find trials" when you're ready to search.`,
+            content,
             patientData: session.patientProfile,
             trials: [],
             totalCost: 0,
@@ -310,7 +343,7 @@ async function handleFastAPIMode(
         let matchingMode = ''; // 'super_batch' or 'sequential'
 
         // Stream from FastAPI backend
-        for await (const event of streamMatching(patientInput, 20, abortController.signal)) {
+        for await (const event of streamMatching(patientInput, 10, abortController.signal)) {
           switch (event.type) {
             // ---------------------------------------------------------------
             // Phase lifecycle events → map to 4 frontend steps

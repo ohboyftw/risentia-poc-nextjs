@@ -31,7 +31,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isPipelineRunning: false,
   trials: [],
   totalCost: 0,
-  mode: 'local',
+  mode: 'fastapi',
   trialProgress: [],
   matchingDetail: null,
 

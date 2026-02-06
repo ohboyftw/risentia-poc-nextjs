@@ -196,41 +196,6 @@ export default function ChatPage() {
                     )}
                   </AnimatePresence>
 
-                  {/* Architecture Info */}
-                  <Card>
-                    <CardHeader className="p-4 pb-2">
-                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                        <div className="p-1.5 bg-accent/10 rounded-lg">
-                          <FlaskConical className="h-3.5 w-3.5 text-accent" />
-                        </div>
-                        Architecture
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0">
-                      <ul className="space-y-2 text-xs text-muted-foreground">
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                          @langchain/langgraph
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                          @langchain/langgraph-sdk
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                          StateGraph with Annotations
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                          SSE streaming
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                          Thread-based state
-                        </li>
-                      </ul>
-                    </CardContent>
-                  </Card>
                 </div>
               </motion.div>
             )}

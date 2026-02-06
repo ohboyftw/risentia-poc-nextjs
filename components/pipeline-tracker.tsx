@@ -150,8 +150,8 @@ function PipelineStepItem({ step, isLast, layout }: PipelineStepItemProps) {
                   />
                 )}
               </div>
-              <span className="text-[10px] font-medium truncate max-w-[60px] text-center">
-                {step.status === 'running' && step.detail ? step.detail : step.name.split(' ')[0]}
+              <span className="text-[10px] font-medium truncate max-w-[80px] text-center">
+                {step.name.split(' ').slice(0, 2).join(' ')}
               </span>
               <Badge
                 className={cn('h-4 text-[9px] px-1', modelColors[step.model])}
@@ -163,6 +163,9 @@ function PipelineStepItem({ step, isLast, layout }: PipelineStepItemProps) {
           <TooltipContent side="bottom" className="text-xs">
             <p className="font-medium">{step.name}</p>
             <p className="text-muted-foreground">{step.description}</p>
+            {step.status === 'running' && step.detail && (
+              <p className="text-accent mt-1">{step.detail}</p>
+            )}
             <p className="text-muted-foreground mt-1">Model: {modelNames[step.model]}</p>
             {step.cost !== undefined && (
               <p className="text-success mt-1">Cost: ${step.cost.toFixed(4)}</p>
