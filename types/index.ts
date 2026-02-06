@@ -13,6 +13,7 @@ export interface PatientProfile {
   msiStatus?: string;
   priorTreatments: string[];
   ecog?: number;
+  rawText?: string;  // Original text used to parse profile
 }
 
 export const createEmptyPatientProfile = (): PatientProfile => ({
@@ -41,20 +42,21 @@ export type IntakeStage = 'welcome' | 'demographics' | 'diagnosis' | 'biomarkers
 // Pipeline
 // =============================================================================
 
-export type ModelId = 'qwen-7b' | 'qwen-72b' | 'claude-sonnet' | 'claude-haiku';
+export type ModelId = 'qwen-flash' | 'qwen-plus' | 'rule-based' | 'claude-sonnet' | 'claude-haiku';
 
 export interface ModelConfig {
   id: ModelId;
   name: string;
   color: string;
-  costPerKToken: { input: number; output: number };
+  costPerMToken: { input: number; output: number };
 }
 
 export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
-  'qwen-7b': { id: 'qwen-7b', name: 'Qwen 7B', color: '#FBBF24', costPerKToken: { input: 0.0001, output: 0.0001 } },
-  'qwen-72b': { id: 'qwen-72b', name: 'Qwen 72B', color: '#F59E0B', costPerKToken: { input: 0.0006, output: 0.0006 } },
-  'claude-sonnet': { id: 'claude-sonnet', name: 'Claude Sonnet', color: '#8B5CF6', costPerKToken: { input: 3.0, output: 15.0 } },
-  'claude-haiku': { id: 'claude-haiku', name: 'Claude Haiku', color: '#A78BFA', costPerKToken: { input: 0.25, output: 1.25 } },
+  'qwen-flash': { id: 'qwen-flash', name: 'Qwen Flash', color: '#FBBF24', costPerMToken: { input: 0.05, output: 0.05 } },
+  'qwen-plus': { id: 'qwen-plus', name: 'Qwen Plus', color: '#F59E0B', costPerMToken: { input: 0.40, output: 0.40 } },
+  'rule-based': { id: 'rule-based', name: 'Rule-based', color: '#9CA3AF', costPerMToken: { input: 0, output: 0 } },
+  'claude-sonnet': { id: 'claude-sonnet', name: 'Claude Sonnet', color: '#8B5CF6', costPerMToken: { input: 3.0, output: 15.0 } },
+  'claude-haiku': { id: 'claude-haiku', name: 'Claude Haiku', color: '#A78BFA', costPerMToken: { input: 0.25, output: 1.25 } },
 };
 
 export interface PipelineStep {
@@ -65,15 +67,24 @@ export interface PipelineStep {
   tokens?: { input: number; output: number };
   cost?: number;
   duration?: number;
+  progress?: number;
+  detail?: string;
+}
+
+export interface TrialProgressEvent {
+  nctId: string;
+  title: string;
+  index: number;
+  total: number;
+  status: string;
+  confidence?: number;
 }
 
 export const PIPELINE_STEPS: Omit<PipelineStep, 'status'>[] = [
-  { name: 'Parse Patient', description: 'Extract patient data', model: 'qwen-7b' },
-  { name: 'Retrieve Trials', description: 'Find candidate trials', model: 'qwen-7b' },
-  { name: 'Demographic Filter', description: 'Check demographics', model: 'qwen-7b' },
-  { name: 'Biomarker Match', description: 'Match biomarkers', model: 'qwen-72b' },
-  { name: 'Eligibility Analysis', description: 'Complex reasoning', model: 'claude-sonnet' },
-  { name: 'Generate Summary', description: 'Create response', model: 'claude-haiku' },
+  { name: 'Retrieve Trials', description: 'BM25 + semantic search', model: 'qwen-flash' },
+  { name: 'Pre-filter', description: 'Age, gender, ECOG checks', model: 'rule-based' },
+  { name: 'Assess Eligibility', description: 'Inclusion/exclusion criteria', model: 'qwen-plus' },
+  { name: 'Rank & Report', description: 'Score and explain matches', model: 'claude-sonnet' },
 ];
 
 // =============================================================================
@@ -91,3 +102,12 @@ export interface TrialMatch {
   matchReasons: string[];
   concerns: string[];
 }
+
+// Alias for API compatibility
+export type TrialResult = TrialMatch;
+
+// =============================================================================
+// Modes
+// =============================================================================
+
+export type AppMode = 'local' | 'remote' | 'fastapi';

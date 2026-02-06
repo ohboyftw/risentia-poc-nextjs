@@ -24,8 +24,14 @@ const GraphState = Annotation.Root({
     default: () => [],
     reducer: (prev, next) => [...prev, ...next],
   }),
-  candidateTrials: Annotation<TrialMatch[]>({ default: () => [] }),
-  matchedTrials: Annotation<TrialMatch[]>({ default: () => [] }),
+  candidateTrials: Annotation<TrialMatch[]>({
+    default: () => [],
+    reducer: (_, next) => next,
+  }),
+  matchedTrials: Annotation<TrialMatch[]>({
+    default: () => [],
+    reducer: (_, next) => next,
+  }),
   response: Annotation<string>(),
   totalCost: Annotation<number>({
     default: () => 0,
@@ -49,7 +55,7 @@ interface PipelineResult {
 
 function calculateCost(model: keyof typeof MODEL_CONFIGS, inputTokens: number, outputTokens: number): number {
   const cfg = MODEL_CONFIGS[model];
-  return (inputTokens / 1000) * cfg.costPerKToken.input + (outputTokens / 1000) * cfg.costPerKToken.output;
+  return (inputTokens / 1_000_000) * cfg.costPerMToken.input + (outputTokens / 1_000_000) * cfg.costPerMToken.output;
 }
 
 // =============================================================================
@@ -110,11 +116,11 @@ async function parsePatient(state: State): Promise<Partial<State>> {
     }
   }
 
-  const cost = calculateCost('qwen-7b', 200, 100);
+  const cost = calculateCost('qwen-flash', 200, 100);
   return {
     patientProfile: updated,
     currentStep: 'parse',
-    pipelineResults: [{ name: 'Parse Patient', model: 'qwen-7b', cost, duration: 50 }],
+    pipelineResults: [{ name: 'Retrieve Trials', model: 'qwen-flash', cost, duration: 50 }],
     totalCost: cost,
   };
 }
@@ -133,11 +139,11 @@ async function retrieveTrials(state: State): Promise<Partial<State>> {
       locations: ['San Francisco'], matchScore: 0, matchReasons: [], concerns: [] },
   ];
 
-  const cost = calculateCost('qwen-7b', 200, 400);
+  const cost = calculateCost('qwen-flash', 200, 400);
   return {
     candidateTrials: trials,
     currentStep: 'retrieve',
-    pipelineResults: [{ name: 'Retrieve Trials', model: 'qwen-7b', cost, duration: 100 }],
+    pipelineResults: [{ name: 'Pre-filter', model: 'qwen-flash', cost, duration: 100 }],
     totalCost: cost,
   };
 }
@@ -164,11 +170,11 @@ async function matchBiomarkers(state: State): Promise<Partial<State>> {
     return { ...trial, matchReasons: reasons, matchScore: score };
   });
 
-  const cost = calculateCost('qwen-72b', 600, 300);
+  const cost = calculateCost('qwen-plus', 600, 300);
   return {
     candidateTrials: matched,
     currentStep: 'biomarkers',
-    pipelineResults: [{ name: 'Biomarker Match', model: 'qwen-72b', cost, duration: 200 }],
+    pipelineResults: [{ name: 'Assess Eligibility', model: 'qwen-plus', cost, duration: 200 }],
     totalCost: cost,
   };
 }
@@ -193,7 +199,7 @@ async function analyzeEligibility(state: State): Promise<Partial<State>> {
   return {
     matchedTrials: analyzed.sort((a, b) => b.matchScore - a.matchScore),
     currentStep: 'eligibility',
-    pipelineResults: [{ name: 'Eligibility Analysis', model: 'claude-sonnet', cost, duration: 500 }],
+    pipelineResults: [{ name: 'Rank & Report', model: 'claude-sonnet', cost, duration: 500 }],
     totalCost: cost,
   };
 }
@@ -226,7 +232,7 @@ Found **${matchedTrials.length}** matching trials.
   return {
     response,
     currentStep: 'summary',
-    pipelineResults: [{ name: 'Generate Summary', model: 'claude-haiku', cost, duration: 100 }],
+    pipelineResults: [{ name: 'Rank & Report', model: 'claude-haiku', cost, duration: 100 }],
     totalCost: cost,
   };
 }
@@ -298,6 +304,65 @@ export function shouldTriggerMatchingFromMessage(message: string, profile: Patie
   const patterns = [/find.*trial/i, /search.*trial/i, /match.*trial/i, /start.*match/i];
   const hasMinData = profile.age !== undefined && profile.cancerType !== undefined;
   return patterns.some(p => p.test(message)) && hasMinData;
+}
+
+export function parsePatientFromMessage(message: string): Partial<PatientProfile> {
+  const profile: Partial<PatientProfile> = {
+    biomarkers: {},
+    priorTreatments: [],
+  };
+
+  // Age
+  const ageMatch = message.match(/(\d+)[\s-]*(year|yr|y\/?o)/i);
+  if (ageMatch) profile.age = parseInt(ageMatch[1]);
+
+  // Sex
+  if (/\b(male|man)\b/i.test(message)) profile.sex = 'Male';
+  else if (/\b(female|woman)\b/i.test(message)) profile.sex = 'Female';
+
+  // Cancer type
+  const cancerMap: Record<string, string> = {
+    nsclc: 'NSCLC', 'non-small cell lung': 'NSCLC', sclc: 'SCLC',
+    breast: 'Breast Cancer', tnbc: 'TNBC', melanoma: 'Melanoma',
+    colorectal: 'CRC', pancreatic: 'Pancreatic',
+  };
+  for (const [key, value] of Object.entries(cancerMap)) {
+    if (message.toLowerCase().includes(key)) { profile.cancerType = value; break; }
+  }
+
+  // Stage
+  const stageMatch = message.match(/stage[\s:=-]*(I{1,3}V?|IV)[ABC]?/i);
+  if (stageMatch) profile.stage = stageMatch[0].toUpperCase();
+  else if (/\b(metastatic|advanced)\b/i.test(message)) profile.stage = 'Stage IV';
+
+  // Biomarkers
+  for (const marker of ['EGFR', 'BRAF', 'KRAS', 'ALK', 'ROS1', 'HER2']) {
+    const regex = new RegExp(`${marker}[\\s:=-]*(\\S+)?`, 'i');
+    const match = message.match(regex);
+    if (match) {
+      const ctx = message.slice(Math.max(0, match.index! - 20), match.index! + 30);
+      profile.biomarkers![marker] = /pos|positive|\+|mutant/i.test(ctx) ? 'Positive' :
+        /neg|negative|-|wild/i.test(ctx) ? 'Negative' : 'Detected';
+    }
+  }
+
+  // PD-L1
+  const pdl1 = message.match(/pd-?l1[\s:=-]*(tps)?[\s:=-]*(\d+)\s*%?/i);
+  if (pdl1) profile.pdl1Score = `TPS ${pdl1[2]}%`;
+
+  // ECOG
+  const ecog = message.match(/ecog[\s:=-]*(\d)/i);
+  if (ecog) profile.ecog = parseInt(ecog[1]);
+
+  // Treatments
+  const treatments = ['carboplatin', 'cisplatin', 'pemetrexed', 'pembrolizumab', 'nivolumab', 'osimertinib'];
+  for (const tx of treatments) {
+    if (message.toLowerCase().includes(tx)) {
+      profile.priorTreatments!.push(tx.charAt(0).toUpperCase() + tx.slice(1));
+    }
+  }
+
+  return profile;
 }
 
 export const graph = createTrialMatchingGraph();
