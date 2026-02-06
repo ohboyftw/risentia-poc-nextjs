@@ -29,7 +29,7 @@ const sessions = new Map<string, Session>();
 
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, message, mode = 'local', patientProfile: clientProfile } = await request.json();
+    const { sessionId, message, mode = 'local' } = await request.json();
 
     if (!sessionId || !message) {
       return Response.json({ error: 'Missing sessionId or message' }, { status: 400 });
@@ -40,11 +40,6 @@ export async function POST(request: NextRequest) {
     if (!session) {
       session = { patientProfile: createEmptyPatientProfile(), chatHistory: [] };
       sessions.set(sessionId, session);
-    }
-
-    // Restore patient profile from client if server session is empty (cold start / redeploy)
-    if (clientProfile && !session.patientProfile.age && clientProfile.age) {
-      session.patientProfile = { ...session.patientProfile, ...clientProfile };
     }
 
     const triggerMatching = shouldTriggerMatchingFromMessage(message, session.patientProfile);

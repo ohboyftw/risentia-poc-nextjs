@@ -62,11 +62,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     try {
-      const { patientProfile } = get();
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, message: content, mode, patientProfile }),
+        body: JSON.stringify({ sessionId, message: content, mode }),
       });
 
       if (!response.ok) throw new Error('Failed');
