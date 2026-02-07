@@ -338,36 +338,60 @@ export function parsePatientFromMessage(message: string): Partial<PatientProfile
     priorTreatments: [],
   };
 
-  // Age
-  const ageMatch = message.match(/(\d+)[\s-]*(year|yr|y\/?o)/i);
+  // Age: "55 year old", "45yo", "age 45", "aged 62", "58-yr-old", "age: 71"
+  const ageMatch = message.match(/(\d+)[\s-]*(year|yr|y\/?o)/i)
+    || message.match(/\bage[d]?[\s:=-]*(\d+)/i);
   if (ageMatch) profile.age = parseInt(ageMatch[1]);
 
   // Sex
   if (/\b(male|man)\b/i.test(message)) profile.sex = 'Male';
   else if (/\b(female|woman)\b/i.test(message)) profile.sex = 'Female';
 
-  // Cancer type
+  // Cancer type (expanded map)
   const cancerMap: Record<string, string> = {
-    nsclc: 'NSCLC', 'non-small cell lung': 'NSCLC', sclc: 'SCLC',
-    breast: 'Breast Cancer', tnbc: 'TNBC', melanoma: 'Melanoma',
-    colorectal: 'CRC', pancreatic: 'Pancreatic',
+    'non-small cell lung': 'NSCLC', nsclc: 'NSCLC', sclc: 'SCLC',
+    'small cell lung': 'SCLC', 'lung cancer': 'NSCLC', 'lung adenocarcinoma': 'NSCLC',
+    breast: 'Breast Cancer', tnbc: 'TNBC', 'triple negative': 'TNBC',
+    melanoma: 'Melanoma', colorectal: 'CRC', 'colon cancer': 'CRC', 'rectal cancer': 'CRC',
+    pancreatic: 'Pancreatic Cancer', ovarian: 'Ovarian Cancer', prostate: 'Prostate Cancer',
+    glioblastoma: 'Glioblastoma', gbm: 'Glioblastoma',
+    hepatocellular: 'HCC', hcc: 'HCC', 'liver cancer': 'HCC',
+    renal: 'RCC', rcc: 'RCC', 'kidney cancer': 'RCC',
+    gastric: 'Gastric Cancer', 'stomach cancer': 'Gastric Cancer',
+    esophageal: 'Esophageal Cancer', bladder: 'Bladder Cancer', urothelial: 'Urothelial Cancer',
+    mesothelioma: 'Mesothelioma', lymphoma: 'Lymphoma', leukemia: 'Leukemia',
+    myeloma: 'Multiple Myeloma', sarcoma: 'Sarcoma',
+    adenocarcinoma: 'Adenocarcinoma', squamous: 'Squamous Cell Carcinoma',
+    carcinoma: 'Carcinoma', neuroendocrine: 'Neuroendocrine Tumor',
+    cholangiocarcinoma: 'Cholangiocarcinoma', 'bile duct': 'Cholangiocarcinoma',
+    thyroid: 'Thyroid Cancer', endometrial: 'Endometrial Cancer', cervical: 'Cervical Cancer',
+    'head and neck': 'Head and Neck Cancer', nasopharyngeal: 'Nasopharyngeal Cancer',
   };
-  for (const [key, value] of Object.entries(cancerMap)) {
-    if (message.toLowerCase().includes(key)) { profile.cancerType = value; break; }
+  // Check longer keys first to match "non-small cell lung" before "lung"
+  const sortedKeys = Object.keys(cancerMap).sort((a, b) => b.length - a.length);
+  const msgLower = message.toLowerCase();
+  for (const key of sortedKeys) {
+    if (msgLower.includes(key)) { profile.cancerType = cancerMap[key]; break; }
   }
 
-  // Stage
-  const stageMatch = message.match(/stage[\s:=-]*(I{1,3}V?|IV)[ABC]?/i);
-  if (stageMatch) profile.stage = stageMatch[0].toUpperCase();
-  else if (/\b(metastatic|advanced)\b/i.test(message)) profile.stage = 'Stage IV';
+  // Stage: "stage IV", "stage 4", "stage IIIB", "T2N1M0"
+  const stageMatch = message.match(/stage[\s:=-]*(I{1,3}V?|IV|[1-4])[ABC]?/i);
+  if (stageMatch) {
+    const stageNum: Record<string, string> = { '1': 'I', '2': 'II', '3': 'III', '4': 'IV' };
+    const raw = stageMatch[1];
+    const roman = stageNum[raw] || raw.toUpperCase();
+    profile.stage = `STAGE ${roman}`;
+  } else if (/\b(metastatic|advanced|mets)\b/i.test(message)) {
+    profile.stage = 'Stage IV';
+  }
 
   // Biomarkers
-  for (const marker of ['EGFR', 'BRAF', 'KRAS', 'ALK', 'ROS1', 'HER2']) {
-    const regex = new RegExp(`${marker}[\\s:=-]*(\\S+)?`, 'i');
+  for (const marker of ['EGFR', 'BRAF', 'KRAS', 'ALK', 'ROS1', 'HER2', 'NTRK', 'MET', 'RET', 'PIK3CA', 'BRCA1', 'BRCA2', 'TP53', 'IDH1', 'IDH2', 'FGFR']) {
+    const regex = new RegExp(`\\b${marker}\\b[\\s:=-]*(\\S+)?`, 'i');
     const match = message.match(regex);
     if (match) {
       const ctx = message.slice(Math.max(0, match.index! - 20), match.index! + 30);
-      profile.biomarkers![marker] = /pos|positive|\+|mutant/i.test(ctx) ? 'Positive' :
+      profile.biomarkers![marker] = /pos|positive|\+|mutant|mutation|amplif/i.test(ctx) ? 'Positive' :
         /neg|negative|-|wild/i.test(ctx) ? 'Negative' : 'Detected';
     }
   }
@@ -380,11 +404,23 @@ export function parsePatientFromMessage(message: string): Partial<PatientProfile
   const ecog = message.match(/ecog[\s:=-]*(\d)/i);
   if (ecog) profile.ecog = parseInt(ecog[1]);
 
-  // Treatments
-  const treatments = ['carboplatin', 'cisplatin', 'pemetrexed', 'pembrolizumab', 'nivolumab', 'osimertinib'];
+  // Treatments (expanded)
+  const treatments = [
+    'carboplatin', 'cisplatin', 'pemetrexed', 'pembrolizumab', 'nivolumab', 'osimertinib',
+    'atezolizumab', 'durvalumab', 'ipilimumab', 'trastuzumab', 'bevacizumab',
+    'docetaxel', 'paclitaxel', 'gemcitabine', 'irinotecan', 'capecitabine',
+    'erlotinib', 'gefitinib', 'crizotinib', 'alectinib', 'lorlatinib',
+    'sotorasib', 'adagrasib', 'dabrafenib', 'trametinib', 'vemurafenib',
+    'olaparib', 'niraparib', 'rucaparib', 'temozolomide', 'lenvatinib', 'sorafenib',
+    'chemotherapy', 'chemo', 'immunotherapy', 'radiation', 'radiotherapy', 'surgery',
+  ];
   for (const tx of treatments) {
-    if (message.toLowerCase().includes(tx)) {
-      profile.priorTreatments!.push(tx.charAt(0).toUpperCase() + tx.slice(1));
+    if (msgLower.includes(tx) && !profile.priorTreatments!.includes(tx)) {
+      // Normalize "chemo" → "Chemotherapy"
+      const normalized = tx === 'chemo' ? 'Chemotherapy' : tx.charAt(0).toUpperCase() + tx.slice(1);
+      if (!profile.priorTreatments!.includes(normalized)) {
+        profile.priorTreatments!.push(normalized);
+      }
     }
   }
 

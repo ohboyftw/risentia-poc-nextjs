@@ -1,9 +1,9 @@
 /**
- * LLM-based patient profile extraction using Qwen Flash via DashScope.
- * Replaces the regex-based parsePatientFromMessage for FastAPI mode.
+ * LLM-based patient profile extraction using Claude Haiku.
+ * Uses @langchain/anthropic (already installed) with structured output.
  */
 
-import { ChatOpenAI } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
 import { z } from 'zod';
 
 const PatientExtractionSchema = z.object({
@@ -11,22 +11,19 @@ const PatientExtractionSchema = z.object({
   sex: z.enum(['Male', 'Female']).optional().describe('Patient sex'),
   cancerType: z.string().optional().describe('Cancer type or diagnosis (e.g. NSCLC, Breast Cancer, Melanoma, Adenocarcinoma, CRC)'),
   stage: z.string().optional().describe('Cancer stage (e.g. Stage IV, Stage IIIB)'),
-  biomarkers: z.record(z.string()).optional().describe('Biomarker name → status mapping (e.g. {"EGFR": "Positive", "KRAS": "Negative"})'),
+  biomarkers: z.record(z.string()).optional().describe('Biomarker name to status mapping (e.g. {"EGFR": "Positive", "KRAS": "Negative"})'),
   ecog: z.number().optional().describe('ECOG performance status (0-4)'),
   priorTreatments: z.array(z.string()).optional().describe('List of prior treatments or therapies'),
   pdl1Score: z.string().optional().describe('PD-L1 score (e.g. "TPS 80%")'),
 });
 
-let llm: ChatOpenAI | null = null;
+let llm: ChatAnthropic | null = null;
 
-function getLLM(): ChatOpenAI {
+function getLLM(): ChatAnthropic {
   if (!llm) {
-    llm = new ChatOpenAI({
-      model: 'qwen-flash',
-      apiKey: process.env.DASHSCOPE_API_KEY,
-      configuration: {
-        baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-      },
+    llm = new ChatAnthropic({
+      model: 'claude-haiku-4-5-20251001',
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       temperature: 0,
       maxTokens: 200,
     });
@@ -62,8 +59,7 @@ export async function extractPatientFromMessage(
       ...(result.ecog !== undefined ? { ecog: result.ecog } : {}),
     };
   } catch (error) {
-    console.error('LLM patient extraction failed, falling back to regex:', error);
-    // Dynamic import to avoid circular deps
+    console.error('Claude extraction failed, falling back to regex:', error);
     const { parsePatientFromMessage } = await import('@/lib/langgraph/graph');
     return parsePatientFromMessage(message);
   }
