@@ -110,4 +110,4 @@ export type TrialResult = TrialMatch;
 // Modes
 // =============================================================================
 
-export type AppMode = 'local' | 'remote' | 'fastapi';
+export type AppMode = 'local' | 'fastapi';

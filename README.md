@@ -19,8 +19,8 @@ Next.js frontend for the Risentia Clinical Trial Matching platform.
 
 ## Modes
 
-1. **Local Mode** - Client-side LangGraph execution (mock data)
-2. **Remote Mode** - Connects to FastAPI backend via LangGraph SDK
+1. **Mock Mode** - Client-side LangGraph execution with mock data (for testing/demo)
+2. **FastAPI Mode** - Connects directly to Risentia FastAPI backend on Azure Container Apps
 
 ## Getting Started
 

@@ -14,7 +14,6 @@ import type { AppMode } from '@/types';
 const MODE_CONFIG: Record<AppMode, { label: string; icon: typeof Server; color: string }> = {
   local: { label: 'Mock', icon: Monitor, color: 'bg-amber-500/10 text-amber-600 border-amber-200' },
   fastapi: { label: 'FastAPI', icon: Cloud, color: 'bg-emerald-500/10 text-emerald-600 border-emerald-200' },
-  remote: { label: 'Remote', icon: Server, color: 'bg-blue-500/10 text-blue-600 border-blue-200' },
 };
 
 interface HeaderProps {
@@ -75,7 +74,7 @@ export function Header({ mode, onModeChange, onReset }: HeaderProps) {
           <button
             className="sm:hidden"
             onClick={() => {
-              const modes: AppMode[] = ['local', 'fastapi', 'remote'];
+              const modes: AppMode[] = ['local', 'fastapi'];
               const next = modes[(modes.indexOf(mode) + 1) % modes.length];
               onModeChange(next);
             }}

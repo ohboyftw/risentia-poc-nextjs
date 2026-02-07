@@ -45,11 +45,9 @@ export async function POST(request: NextRequest) {
     const triggerMatching = shouldTriggerMatchingFromMessage(message, session.patientProfile);
     const encoder = new TextEncoder();
 
-    // Choose mode: local, remote (SDK), or fastapi
+    // Choose mode: local (mock) or fastapi
     if (mode === 'fastapi') {
       return handleFastAPIMode(encoder, session, sessionId, message, triggerMatching);
-    } else if (mode === 'remote') {
-      return handleRemoteMode(encoder, session, sessionId, message, triggerMatching);
     } else {
       return handleLocalMode(encoder, session, sessionId, message, triggerMatching);
     }
@@ -137,97 +135,6 @@ async function handleLocalMode(
         console.error('Stream error:', error);
         controller.enqueue(encoder.encode(
           `data: ${JSON.stringify({ type: 'error', message: 'Processing error.' })}\n\n`
-        ));
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
-  });
-}
-
-// =============================================================================
-// Remote Mode - Use LangGraph SDK
-// =============================================================================
-
-async function handleRemoteMode(
-  encoder: TextEncoder,
-  session: Session,
-  sessionId: string,
-  message: string,
-  triggerMatching: boolean
-) {
-  // Check if SDK server is available
-  const healthy = await checkHealth();
-  if (!healthy) {
-    return Response.json(
-      { error: 'LangGraph server unavailable. Use local mode or check LANGGRAPH_API_URL.' },
-      { status: 503 }
-    );
-  }
-
-  // Create thread if needed
-  if (!session.threadId) {
-    const thread = await createThread({ sessionId });
-    session.threadId = thread.thread_id;
-  }
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        // Use SDK streaming
-        for await (const event of sdkChat(message, {
-          threadId: session.threadId,
-          patientProfile: session.patientProfile,
-          triggerMatching,
-        })) {
-          switch (event.type) {
-            case 'step_start':
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({ type: 'step_start', step: event.step })}\n\n`
-              ));
-              break;
-
-            case 'step_complete':
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'step_complete',
-                  step: event.step,
-                  cost: event.cost,
-                })}\n\n`
-              ));
-              break;
-
-            case 'complete':
-              if (event.patientProfile) {
-                session.patientProfile = event.patientProfile;
-              }
-
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'response',
-                  content: event.response || '',
-                  patientData: event.patientProfile || session.patientProfile,
-                  trials: event.trials || [],
-                  totalCost: event.totalCost || 0,
-                })}\n\n`
-              ));
-              break;
-          }
-        }
-
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-        controller.close();
-      } catch (error) {
-        console.error('SDK stream error:', error);
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({ type: 'error', message: 'SDK error. Try local mode.' })}\n\n`
         ));
         controller.close();
       }
