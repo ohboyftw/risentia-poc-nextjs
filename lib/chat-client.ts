@@ -1,11 +1,9 @@
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText, ModelMessage } from 'ai';
+/**
+ * Chat client using Claude Haiku for conversational responses.
+ */
 
-const dashscope = createOpenAICompatible({
-  name: 'dashscope',
-  apiKey: process.env.DASHSCOPE_API_KEY ?? '',
-  baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-});
+import { ChatAnthropic } from '@langchain/anthropic';
+import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 
 const SYSTEM_PROMPT = `You are Risentia's clinical trial matching assistant. Your role:
 
@@ -25,22 +23,33 @@ IMPORTANT: Never mention timing estimates or how long matching will take. Just c
 
 Keep responses concise (2-4 sentences). Use markdown for formatting when helpful.`;
 
-export async function chatWithQwen(
+let llm: ChatAnthropic | null = null;
+
+function getLLM(): ChatAnthropic {
+  if (!llm) {
+    llm = new ChatAnthropic({
+      model: 'claude-haiku-4-5-20251001',
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      temperature: 0.7,
+      maxTokens: 300,
+    });
+  }
+  return llm;
+}
+
+export async function chatWithClaude(
   userMessage: string,
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<string> {
-  const messages: ModelMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    ...conversationHistory.slice(-6), // Last 3 exchanges for context
-    { role: 'user', content: userMessage },
+  const messages = [
+    new SystemMessage(SYSTEM_PROMPT),
+    ...conversationHistory.slice(-6).map(msg =>
+      msg.role === 'user' ? new HumanMessage(msg.content) : new AIMessage(msg.content)
+    ),
+    new HumanMessage(userMessage),
   ];
 
-  const { text } = await generateText({
-    model: dashscope('qwen-flash'),
-    messages,
-    maxOutputTokens: 300,
-    temperature: 0.7,
-  });
-
-  return text || 'I can help you find matching clinical trials. Please describe your patient profile.';
+  const response = await getLLM().invoke(messages);
+  return (typeof response.content === 'string' ? response.content : '') ||
+    'I can help you find matching clinical trials. Please describe your patient profile.';
 }

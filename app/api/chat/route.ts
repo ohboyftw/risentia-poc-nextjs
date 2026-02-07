@@ -17,7 +17,7 @@ import {
   checkHealth as checkFastAPIHealth,
   FastAPIEvent,
 } from '@/lib/fastapi-client';
-import { chatWithQwen } from '@/lib/qwen-client';
+import { chatWithClaude } from '@/lib/chat-client';
 import { PatientProfile, createEmptyPatientProfile, TrialResult } from '@/types';
 
 // In-memory session store (use Redis in production)
@@ -162,32 +162,33 @@ async function handleFastAPIMode(
   message: string,
   triggerMatching: boolean
 ) {
-  // Use LLM-based extraction (falls back to regex on failure)
-  const parsedProfile = await extractPatientFromMessage(message);
-  const hasPatientData = Object.keys(parsedProfile).some(
-    k => k !== 'biomarkers' && k !== 'priorTreatments' && parsedProfile[k as keyof typeof parsedProfile] !== undefined
-  ) || Object.keys(parsedProfile.biomarkers || {}).length > 0 || (parsedProfile.priorTreatments || []).length > 0;
-
-  if (hasPatientData) {
-    session.patientProfile = {
-      ...session.patientProfile,
-      ...parsedProfile,
-      biomarkers: { ...session.patientProfile.biomarkers, ...parsedProfile.biomarkers },
-      priorTreatments: [
-        ...new Set([...session.patientProfile.priorTreatments, ...(parsedProfile.priorTreatments || [])]),
-      ],
-      rawText: message,
-    };
-  }
-
-  // If not triggering matching, chat with Qwen LLM
+  // If not triggering matching, extract patient data and chat with Qwen
   if (!triggerMatching) {
+    // Extract patient info via Claude (skip for "find trials" etc.)
+    const parsedProfile = await extractPatientFromMessage(message);
+    const hasPatientData = Object.keys(parsedProfile).some(
+      k => k !== 'biomarkers' && k !== 'priorTreatments' && parsedProfile[k as keyof typeof parsedProfile] !== undefined
+    ) || Object.keys(parsedProfile.biomarkers || {}).length > 0 || (parsedProfile.priorTreatments || []).length > 0;
+
+    if (hasPatientData) {
+      session.patientProfile = {
+        ...session.patientProfile,
+        ...parsedProfile,
+        biomarkers: { ...session.patientProfile.biomarkers, ...parsedProfile.biomarkers },
+        priorTreatments: [
+          ...new Set([...session.patientProfile.priorTreatments, ...(parsedProfile.priorTreatments || [])]),
+        ],
+        rawText: message,
+      };
+    }
+
+    // Chat with Qwen LLM
     let content: string;
     try {
-      content = await chatWithQwen(message, session.chatHistory);
+      content = await chatWithClaude(message, session.chatHistory);
     } catch (err) {
-      console.error('Qwen chat error:', err);
-      // Graceful fallback if DashScope is unavailable
+      console.error('Chat error:', err);
+      // Graceful fallback if Claude is unavailable
       content = hasPatientData
         ? `Got it — I've updated your patient profile. Say **"find trials"** when you're ready to search.`
         : `I'm your clinical trial matching assistant. Describe a patient profile (age, cancer type, stage, biomarkers) and I'll help find matching trials.`;
