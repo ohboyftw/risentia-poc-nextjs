@@ -9,6 +9,7 @@
 
 import { NextRequest } from 'next/server';
 import { createTrialMatchingGraph, shouldTriggerMatchingFromMessage, parsePatientFromMessage, extractMaxResultsFromMessage } from '@/lib/langgraph/graph';
+import { extractPatientFromMessage } from '@/lib/patient-extractor';
 import { chat as sdkChat, createThread, checkHealth } from '@/lib/langgraph/sdk-client';
 import {
   streamMatching,
@@ -161,8 +162,8 @@ async function handleFastAPIMode(
   message: string,
   triggerMatching: boolean
 ) {
-  // Always parse patient info from the message
-  const parsedProfile = parsePatientFromMessage(message);
+  // Use LLM-based extraction (falls back to regex on failure)
+  const parsedProfile = await extractPatientFromMessage(message);
   const hasPatientData = Object.keys(parsedProfile).some(
     k => k !== 'biomarkers' && k !== 'priorTreatments' && parsedProfile[k as keyof typeof parsedProfile] !== undefined
   ) || Object.keys(parsedProfile.biomarkers || {}).length > 0 || (parsedProfile.priorTreatments || []).length > 0;

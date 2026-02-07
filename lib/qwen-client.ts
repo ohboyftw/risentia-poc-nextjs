@@ -21,6 +21,8 @@ Key facts about this system:
 - Returns ranked trial results with match scores and explanations
 - Required patient info: age, cancer type. Helpful: stage, biomarkers, ECOG, prior treatments
 
+IMPORTANT: Never mention timing estimates or how long matching will take. Just confirm the search is starting.
+
 Keep responses concise (2-4 sentences). Use markdown for formatting when helpful.`;
 
 export async function chatWithQwen(
