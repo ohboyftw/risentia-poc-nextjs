@@ -8,7 +8,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { createTrialMatchingGraph, shouldTriggerMatchingFromMessage, parsePatientFromMessage } from '@/lib/langgraph/graph';
+import { createTrialMatchingGraph, shouldTriggerMatchingFromMessage, parsePatientFromMessage, extractMaxResultsFromMessage } from '@/lib/langgraph/graph';
 import { chat as sdkChat, createThread, checkHealth } from '@/lib/langgraph/sdk-client';
 import {
   streamMatching,
@@ -342,8 +342,11 @@ async function handleFastAPIMode(
         const trials: TrialResult[] = [];
         let matchingMode = ''; // 'super_batch' or 'sequential'
 
+        // Extract max_results from user message (e.g. "find top 2 trials" → 2, default 5)
+        const maxResults = extractMaxResultsFromMessage(message);
+
         // Stream from FastAPI backend
-        for await (const event of streamMatching(patientInput, 10, abortController.signal)) {
+        for await (const event of streamMatching(patientInput, maxResults, abortController.signal)) {
           switch (event.type) {
             // ---------------------------------------------------------------
             // Phase lifecycle events → map to 4 frontend steps

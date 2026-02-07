@@ -4,10 +4,18 @@ import { motion } from 'framer-motion';
 import {
   RotateCcw,
   Server,
+  Monitor,
+  Cloud,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { AppMode } from '@/types';
+
+const MODE_CONFIG: Record<AppMode, { label: string; icon: typeof Server; color: string }> = {
+  local: { label: 'Mock', icon: Monitor, color: 'bg-amber-500/10 text-amber-600 border-amber-200' },
+  fastapi: { label: 'FastAPI', icon: Cloud, color: 'bg-emerald-500/10 text-emerald-600 border-emerald-200' },
+  remote: { label: 'Remote', icon: Server, color: 'bg-blue-500/10 text-blue-600 border-blue-200' },
+};
 
 interface HeaderProps {
   mode: AppMode;
@@ -40,14 +48,46 @@ export function Header({ mode, onModeChange, onReset }: HeaderProps) {
 
         {/* Right Controls */}
         <div className="flex items-center gap-2">
-          {/* Live Badge */}
-          <Badge
-            variant="success"
-            className="hidden sm:flex h-6 text-[10px] gap-1"
+          {/* Mode Switcher */}
+          <div className="hidden sm:flex items-center gap-1">
+            {(Object.keys(MODE_CONFIG) as AppMode[]).map((m) => {
+              const cfg = MODE_CONFIG[m];
+              const Icon = cfg.icon;
+              const isActive = mode === m;
+              return (
+                <button
+                  key={m}
+                  onClick={() => onModeChange(m)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${
+                    isActive
+                      ? cfg.color
+                      : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted'
+                  }`}
+                >
+                  <Icon className="h-3 w-3" />
+                  {cfg.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mobile: compact mode badge (tap to cycle) */}
+          <button
+            className="sm:hidden"
+            onClick={() => {
+              const modes: AppMode[] = ['local', 'fastapi', 'remote'];
+              const next = modes[(modes.indexOf(mode) + 1) % modes.length];
+              onModeChange(next);
+            }}
           >
-            <Server className="h-3 w-3" />
-            Live
-          </Badge>
+            <Badge
+              variant="outline"
+              className={`h-6 text-[10px] gap-1 ${MODE_CONFIG[mode].color}`}
+            >
+              {(() => { const Icon = MODE_CONFIG[mode].icon; return <Icon className="h-3 w-3" />; })()}
+              {MODE_CONFIG[mode].label}
+            </Badge>
+          </button>
 
           {/* Reset Button */}
           <Button

@@ -306,6 +306,32 @@ export function shouldTriggerMatchingFromMessage(message: string, profile: Patie
   return patterns.some(p => p.test(message)) && hasMinData;
 }
 
+/**
+ * Extract the desired number of results from a user message.
+ * E.g. "find top 2 trials" → 2, "find top three trials" → 3, "find trials" → defaultMax
+ */
+export function extractMaxResultsFromMessage(message: string, defaultMax: number = 5): number {
+  const wordToNum: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+
+  // Match digit: "top 3 trials"
+  const digitMatch = message.match(/(?:top|best|first)\s+(\d+)/i);
+  if (digitMatch) {
+    const n = parseInt(digitMatch[1], 10);
+    if (n >= 1 && n <= 20) return n;
+  }
+
+  // Match word: "top three trials"
+  const wordMatch = message.match(/(?:top|best|first)\s+(one|two|three|four|five|six|seven|eight|nine|ten)/i);
+  if (wordMatch) {
+    return wordToNum[wordMatch[1].toLowerCase()] ?? defaultMax;
+  }
+
+  return defaultMax;
+}
+
 export function parsePatientFromMessage(message: string): Partial<PatientProfile> {
   const profile: Partial<PatientProfile> = {
     biomarkers: {},
