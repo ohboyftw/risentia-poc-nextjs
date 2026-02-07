@@ -65,7 +65,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, message: content, mode }),
+        body: JSON.stringify({ sessionId, message: content, mode, patientProfile: get().patientProfile }),
       });
 
       if (!response.ok) throw new Error('Failed');
@@ -154,7 +154,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     // Mark all steps as complete (defensive)
                     set(state => ({
                       messages: [...state.messages, assistantMessage],
-                      patientProfile: data.patientData || state.patientProfile,
+                      patientProfile: data.patientData
+                        ? {
+                            ...state.patientProfile,
+                            ...data.patientData,
+                            biomarkers: { ...state.patientProfile.biomarkers, ...(data.patientData.biomarkers || {}) },
+                            priorTreatments: [...new Set([
+                              ...state.patientProfile.priorTreatments,
+                              ...(data.patientData.priorTreatments || []),
+                            ])],
+                          }
+                        : state.patientProfile,
                       trials: data.trials || [],
                       totalCost: data.totalCost || 0,
                       isPipelineRunning: false,

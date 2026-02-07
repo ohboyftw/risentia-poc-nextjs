@@ -30,17 +30,31 @@ const sessions = new Map<string, Session>();
 
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, message, mode = 'local' } = await request.json();
+    const { sessionId, message, mode = 'local', patientProfile: clientProfile } = await request.json();
 
     if (!sessionId || !message) {
       return Response.json({ error: 'Missing sessionId or message' }, { status: 400 });
     }
 
-    // Get or create session
+    // Get or create session (seed from client profile on cold start)
     let session = sessions.get(sessionId);
     if (!session) {
-      session = { patientProfile: createEmptyPatientProfile(), chatHistory: [] };
+      session = {
+        patientProfile: clientProfile || createEmptyPatientProfile(),
+        chatHistory: [],
+      };
       sessions.set(sessionId, session);
+    } else if (clientProfile) {
+      // Merge client profile into server session (client is source of truth for accumulated data)
+      session.patientProfile = {
+        ...session.patientProfile,
+        ...clientProfile,
+        biomarkers: { ...clientProfile.biomarkers, ...session.patientProfile.biomarkers },
+        priorTreatments: [...new Set([
+          ...(clientProfile.priorTreatments || []),
+          ...session.patientProfile.priorTreatments,
+        ])],
+      };
     }
 
     const triggerMatching = shouldTriggerMatchingFromMessage(message, session.patientProfile);
